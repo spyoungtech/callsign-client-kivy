@@ -24,7 +24,7 @@ class CallsignInput(MDTextField):
         super().insert_text(substring, from_undo=from_undo)
 
 
-class Demo(MDApp):
+class Callsigns(MDApp):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -66,7 +66,7 @@ class Demo(MDApp):
 
         lookup_layout_right.add_widget(self.history_container)
 
-        self.callsign_input = MDTextField(
+        self.callsign_input = CallsignInput(
             hint_text='Enter callsign', helper_text='e.g., KK7LHM', size_hint_x=None, width=100, halign='center'
         )
 
@@ -227,4 +227,4 @@ class Demo(MDApp):
 
 
 if __name__ == '__main__':
-    Demo().run()
+    Callsigns().run()
