@@ -1,0 +1,31 @@
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+    -   id: mixed-line-ending
+        args: ["-f", "lf"]
+    -   id: check-yaml
+    -   id: end-of-file-fixer
+    -   id: trailing-whitespace
+    -   id: double-quote-string-fixer
+
+-   repo: https://github.com/psf/black
+    rev: '23.3.0'
+    hooks:
+    -   id: black
+        args:
+            - "-S"
+            - "-l"
+            - "120"
+-   repo: https://github.com/asottile/reorder_python_imports
+    rev: v3.9.0
+    hooks:
+    -   id: reorder-python-imports
+
+-   repo: https://github.com/pycqa/flake8
+    rev: '6.0.0'
+    hooks:
+    -   id: flake8
+        args:
+          - "--ignore"
+          - "E501,E704,E301,W503"
