@@ -137,7 +137,7 @@ class Callsigns(MDApp):
                 on_release=partial(self._show_info, data),
                 text_color=self.theme_cls.primary_color,
             ),
-            index=-1,
+            index=len(self.history_list.children),
         )
 
     def _format_name(self, record_data) -> str:
