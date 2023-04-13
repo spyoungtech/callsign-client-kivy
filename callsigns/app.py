@@ -1,4 +1,5 @@
 import string
+import webbrowser
 from functools import partial
 from typing import Any
 
@@ -21,7 +22,7 @@ class CallsignInput(MDTextField):
         for c in substring:
             if c not in string.ascii_letters + string.digits:
                 return
-        super().insert_text(substring, from_undo=from_undo)
+        super().insert_text(substring.upper(), from_undo=from_undo)
 
 
 class Callsigns(MDApp):
@@ -31,10 +32,12 @@ class Callsigns(MDApp):
     def build(self):
         self.store = JsonStore('callsigns.json')
         self.theme_cls.theme_style = 'Dark'
-
+        self.container = MDGridLayout(cols=1, padding=[20, 40, 20, 20])
         self.window = MDGridLayout(cols=1, row_default_height=40)
-        self.window.cols = 1
+        self.container.add_widget(self.window)
         self.dialog = None
+        self.fail_dialog = None
+        self.fcc_dialog = None
 
         title_label = MDLabel(
             text='Callsign Lookup',
@@ -47,7 +50,7 @@ class Callsigns(MDApp):
 
         lookup_layout = MDGridLayout(cols=2)
 
-        lookup_layout_left = MDGridLayout(cols=1)
+        lookup_layout_left = MDGridLayout(cols=1, row_default_height=80)
         lookup_layout_right = MDGridLayout(cols=1)
         lookup_layout.add_widget(lookup_layout_left)
         lookup_layout.add_widget(lookup_layout_right)
@@ -70,9 +73,12 @@ class Callsigns(MDApp):
             hint_text='Enter callsign', helper_text='e.g., KK7LHM', size_hint_x=None, width=100, halign='center'
         )
 
-        btn = MDRectangleFlatButton(text='Lookup', on_release=self.btnfunc)
+        btn = MDRectangleFlatButton(
+            text='Lookup',
+            on_release=self.btnfunc,
+        )
         self.window.add_widget(title_label)
-        lookup_input_layout = MDGridLayout(cols=2, size_hint_y=None, height=200)
+        lookup_input_layout = MDGridLayout(cols=1)
         lookup_input_layout.add_widget(self.callsign_input)
         lookup_input_layout.add_widget(btn)
 
@@ -82,7 +88,7 @@ class Callsigns(MDApp):
         lookup_layout_left.add_widget(self.info_layout)
 
         self.window.add_widget(lookup_layout)
-        return self.window
+        return self.container
 
     def _callsign_not_found_dialog(self):
         if not self.dialog:
@@ -99,14 +105,113 @@ class Callsigns(MDApp):
                         text='FCC LOOKUP',
                         theme_text_color='Custom',
                         text_color=self.theme_cls.primary_color,
+                        on_release=self._fcc_fallback_lookup,
                     ),
                 ],
             )
 
         self.dialog.open()
 
+    def _fcc_lookup_failure_dialog(self, call_sign=None, origin_dialog=None):
+        def _dismiss(inst):
+            self._dismiss_dialog(inst)
+            if origin_dialog is not None:
+                self._dismiss_dialog(origin_dialog)
+
+        self.fail_dialog = MDDialog(
+            text=f'Could not locate data for call sign{(" " + call_sign + " ") if call_sign else ""}. Please try a different call',
+            buttons=[
+                MDFlatButton(
+                    text='OK',
+                    text_color=self.theme_cls.primary_color,
+                    on_release=_dismiss,
+                )
+            ],
+        )
+        self.fail_dialog.open()
+
+    @staticmethod
+    def _find_dialog_parent(obj):
+        while True:
+            if isinstance(obj, MDDialog):
+                return obj
+            elif hasattr(obj, 'parent'):
+                obj = obj.parent
+            else:
+                raise Exception('No dialog found')
+
+    def _fcc_link_dialog(self, fccdata, origin_dialog=None):
+        # example fccdata:
+        # {'status': 'OK',
+        #  'Licenses': {'page': '1',
+        #               'rowPerPage': '100',
+        #               'totalRows': '1',
+        #               'lastUpdate': 'Apr 7, 2023',
+        #               'License': [{'licName': 'Last, First I',
+        #                            'frn': '0012345678',
+        #                            'callsign': 'AA0ZZZ',
+        #                            'categoryDesc': 'Personal Use',
+        #                            'serviceDesc': 'Amateur',
+        #                            'statusDesc': 'Active',
+        #                            'expiredDate': '01/01/2033',
+        #                            'licenseID': '1234567',
+        #                            'licDetailURL': 'http://wireless2.fcc.gov/UlsApp/UlsSearch/license.jsp?__newWindow=false&licKey=1234567'}]}}
+
+        def _dismiss(inst):
+            self._dismiss_dialog(inst)
+            if origin_dialog is not None:
+                self._dismiss_dialog(origin_dialog)
+
+        # XXX: this first result may not be the correct call sign
+        # The FCC License View API can return other call signs than was given in the parameter
+        # esp. when the searched call sign is a substring of another call sign
+        data = fccdata['Licenses']['License'][0]
+
+        # TODO: validate result is for the requested call sign
+
+        self.fcc_dialog = MDDialog(
+            text=f'Call sign {data["callsign"]} found!\n'
+            f'Name: {data["licName"]}\n'
+            f'Status: {data["statusDesc"]}\n\nSee FCC profile page for full details',
+            buttons=[
+                MDFlatButton(
+                    text='Open FCC Profile',
+                    theme_text_color='Custom',
+                    text_color=self.theme_cls.primary_color,
+                    on_release=lambda x: webbrowser.open(data['licDetailURL']),
+                ),
+                MDFlatButton(
+                    text='Done',
+                    theme_text_color='Custom',
+                    text_color=self.theme_cls.primary_color,
+                    on_release=_dismiss,
+                ),
+            ],
+        )
+        self.fcc_dialog.open()
+
+    def _fcc_fallback_lookup(self, inst):
+        call_sign = self.callsign_input.text.upper()
+
+        # TODO: use kivy.network.urlrequest.UrlRequest instead
+        resp = requests.get(
+            f'https://data.fcc.gov/api/license-view/basicSearch/getLicenses?searchValue={call_sign}&format=json'
+        )
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError:
+            self._fcc_lookup_failure_dialog(call_sign, origin_dialog=inst)
+        data = resp.json()
+        if 'Errors' in data:
+            self._fcc_lookup_failure_dialog(call_sign, origin_dialog=inst)
+        else:
+            # TODO: implement push onto history and inline display
+            # for now, we'll just show some of the info in a dialog box
+            self._fcc_link_dialog(data, origin_dialog=inst)
+
     def _dismiss_dialog(self, inst):
-        self.dialog.dismiss(force=True)
+        dialog = self._find_dialog_parent(inst)
+        dialog.dismiss(force=True)
 
     def btnfunc(self, obj):
         t = self.callsign_input.text.upper()
@@ -154,7 +259,17 @@ class Callsigns(MDApp):
                 record_data['street_address'],
                 record_data['attn_line'],
                 f"PO Box {record_data['po_box']}" if record_data['po_box'] else '',
-                ', '.join([record_data['city'], record_data['zip_code']]),
+                ', '.join(
+                    [
+                        record_data['city'],
+                        ' '.join(
+                            (
+                                record_data['state'],
+                                record_data['zip_code'],
+                            )
+                        ),
+                    ]
+                ),
             ]
             if i
         )
@@ -184,25 +299,17 @@ class Callsigns(MDApp):
         self.info_phonetic = MDLabel()
         self.info_vanity = MDLabel()
 
-        match current['status']:
-            case 'A':
-                status = 'Active'
-            case 'C':
-                status = 'Cancelled'
-            case 'E':
-                status = 'Expired'
-            case 'T':
-                status = 'Terminated'
-            case _:
-                status = current['status']
+        statuses = {'A': 'Active', 'C': 'Cancelled', 'E': 'Expired', 'T': 'Terminated'}
+
+        status = statuses.get(current['status'], current['status'])
 
         self.info_addr.text = addr_info
-        self.info_status.text = f'Status: {status}'
+        self.info_status.text = f'Status: {status}' if status else ''
         self.info_grant_date.text = f"Grant Date: {current['grant_date']}"
         self.info_expired_date.text = f"Expiration: {current['expired_date']}"
         self.info_cancellation_date.text = f"Cancellation Date: {current['cancellation_date']}"
         self.info_phonetic.text = f"phonetic: {current['phonetic']}"
-        self.info_call_sign.text = current['call_sign'] + ' (vanity)' if current['vanity'] else ''
+        self.info_call_sign.text = current['call_sign'] + (' (vanity)' if current['vanity'] else '')
         self.info_frn.text = f"FRN: {current['frn']}" if current['frn'] else ''
         self.info_operator_class.text = f"Operator Class: {current['operator_class']}"
 
