@@ -3,7 +3,7 @@ import webbrowser
 from functools import partial
 from typing import Any
 
-import requests
+from kivy.network.urlrequest import UrlRequest
 from kivy.storage.jsonstore import JsonStore
 from kivymd.app import MDApp
 from kivymd.uix.button import MDFlatButton
@@ -193,21 +193,24 @@ class Callsigns(MDApp):
     def _fcc_fallback_lookup(self, inst):
         call_sign = self.callsign_input.text.upper()
 
-        # TODO: use kivy.network.urlrequest.UrlRequest instead
-        resp = requests.get(
-            f'https://data.fcc.gov/api/license-view/basicSearch/getLicenses?searchValue={call_sign}&format=json'
-        )
-        try:
-            resp.raise_for_status()
-        except requests.HTTPError:
-            self._fcc_lookup_failure_dialog(call_sign, origin_dialog=inst)
-        data = resp.json()
-        if 'Errors' in data:
-            self._fcc_lookup_failure_dialog(call_sign, origin_dialog=inst)
-        else:
+        def on_success(req, result):
+            data = result
+            if 'Errors' in data:
+                self._fcc_lookup_failure_dialog(call_sign, origin_dialog=inst)
             # TODO: implement push onto history and inline display
-            # for now, we'll just show some of the info in a dialog box
             self._fcc_link_dialog(data, origin_dialog=inst)
+
+        def on_failure(req, result):
+            self._fcc_lookup_failure_dialog(call_sign, origin_dialog=inst)
+
+        def on_error(req, error):
+            self._fcc_lookup_failure_dialog(call_sign, origin_dialog=inst)
+
+        def on_progress(req, current_size, total_size):
+            pass  # You can add progress handling if needed
+
+        url = f'https://data.fcc.gov/api/license-view/basicSearch/getLicenses?searchValue={call_sign}&format=json'
+        UrlRequest(url, on_success=on_success, on_failure=on_failure, on_error=on_error, on_progress=on_progress)
 
     def _dismiss_dialog(self, inst):
         dialog = self._find_dialog_parent(inst)
@@ -221,14 +224,27 @@ class Callsigns(MDApp):
             data = self.store.get(t)['data']
             self._lookup_success(t, data)
             return
-        r = requests.get(f'https://callsigns.spyoung.com/callsigns/{t}.json')
-        if r.status_code != 200:
-            self._callsign_not_found_dialog()
-        else:
-            data = r.json()
-            expires = r.headers.get('expires')
+
+        def on_success(req, result):
+            data = result
+            from callsigns.parser import LicenseRecord
+
+            data = [LicenseRecord.from_dict(lic_data).as_dict(include_synthetic=True) for lic_data in data]
+            expires = req.resp_headers.get('expires')
             self.store.put(t, data=data, expires=expires)
             self._lookup_success(t, data)
+
+        def on_failure(req, result):
+            self._callsign_not_found_dialog()
+
+        def on_error(req, error):
+            self._callsign_not_found_dialog()
+
+        def on_progress(req, current_size, total_size):
+            pass  # You can add progress handling if needed
+
+        url = f'https://callsigns.spyoung.com/callsigns/{t}.json'
+        UrlRequest(url, on_success=on_success, on_failure=on_failure, on_error=on_error, on_progress=on_progress)
 
     def _push_lookup_history(self, callsign: str, data: list[dict[str, Any]]):
         if len(data) == 1:

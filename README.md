@@ -2,7 +2,22 @@
 
 A kivy-based client for looking up call signs. Ultra-fast.
 
-Right now, only supports USA call signs.
+Right now, only supports USA amateur call signs. Support for Canadian amateur call signs coming soon.
+
+## Install
+
+First install dependencies
+```bash
+pip install -r requirements.txt
+```
+
+Then run the app:
+
+```bash
+python -m callsigns_kivy.app
+```
+
+
 
 ## Demo
 
