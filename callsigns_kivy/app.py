@@ -1,8 +1,15 @@
+import json
+import pathlib
+import re
 import string
+import typing
 import webbrowser
 from functools import partial
 from typing import Any
+from typing import Self
 
+import kivymd.icon_definitions  # noqa
+from kivy.config import Config
 from kivy.network.urlrequest import UrlRequest
 from kivy.storage.jsonstore import JsonStore
 from kivymd.app import MDApp
@@ -15,6 +22,449 @@ from kivymd.uix.list import MDList
 from kivymd.uix.list import OneLineListItem
 from kivymd.uix.scrollview import MDScrollView
 from kivymd.uix.textfield import MDTextField
+
+this_file = pathlib.Path(__file__)
+icon_file = str(this_file.parent / 'callsigns-logo.png')
+
+
+Config.window_icon = icon_file
+
+
+# TODO: support additional alphabets
+PHONETIC_WORDS = {
+    'A': 'Alpha',
+    'B': 'Bravo',
+    'C': 'Charlie',
+    'D': 'Delta',
+    'E': 'Echo',
+    'F': 'Foxtrot',
+    'G': 'Golf',
+    'H': 'Hotel',
+    'I': 'India',
+    'J': 'Juliet',
+    'K': 'Kilo',
+    'L': 'Lima',
+    'M': 'Mike',
+    'N': 'November',
+    'O': 'Oscar',
+    'P': 'Papa',
+    'Q': 'Quebec',
+    'R': 'Romeo',
+    'S': 'Sierra',
+    'T': 'Tango',
+    'U': 'Uniform',
+    'V': 'Victor',
+    'W': 'Whiskey',
+    'X': 'Xray',
+    'Y': 'Yankee',
+    'Z': 'Zulu',
+    '0': 'Zero',
+    '1': 'One',
+    '2': 'Two',
+    '3': 'Three',
+    '4': 'Four',
+    '5': 'Five',
+    '6': 'Six',
+    '7': 'Seven',
+    '8': 'Eight',
+    '9': 'Niner',
+}
+
+SYLLABLE_LENGTHS = {
+    'A': 2,
+    'B': 2,
+    'C': 2,
+    'D': 2,
+    'E': 2,
+    'F': 2,
+    'G': 1,
+    'H': 2,
+    'I': 3,
+    'J': 3,
+    'K': 2,
+    'L': 2,
+    'M': 1,
+    'N': 3,
+    'O': 2,
+    'P': 2,
+    'Q': 2,
+    'R': 3,
+    'S': 3,
+    'T': 2,
+    'U': 3,
+    'V': 2,
+    'W': 2,
+    'X': 2,
+    'Y': 2,
+    'Z': 2,
+    '0': 2,
+    '1': 1,
+    '2': 1,
+    '3': 1,
+    '4': 1,
+    '5': 1,
+    '6': 1,
+    '7': 2,
+    '8': 1,
+    '9': 2,  # 'Niner' is 2 but 'nine' (one syllable) could also be used
+}
+
+MORSE_TABLE = {
+    'A': '.-',
+    'B': '-...',
+    'C': '-.-.',
+    'D': '-..',
+    'E': '.',
+    'F': '..-.',
+    'G': '--.',
+    'H': '....',
+    'I': '..',
+    'J': '.---',
+    'K': '-.-',
+    'L': '.-..',
+    'M': '--',
+    'N': '-.',
+    'O': '---',
+    'P': '.--.',
+    'Q': '--.-',
+    'R': '.-.',
+    'S': '...',
+    'T': '-',
+    'U': '..-',
+    'V': '...-',
+    'W': '.--',
+    'X': '-..-',
+    'Y': '-.--',
+    'Z': '--..',
+    '0': '-----',
+    '1': '.----',
+    '2': '..---',
+    '3': '...--',
+    '4': '....-',
+    '5': '.....',
+    '6': '-....',
+    '7': '--...',
+    '8': '---..',
+    '9': '----.',
+}
+
+
+# REF: https://www.fcc.gov/sites/default/files/public_access_database_definitions_v9_0.pdf
+
+# Amateur fields
+FCC_AM_FIELD_NAMES = [
+    'Record Type [AM]',
+    'Unique System Identifier',
+    'ULS File Number',
+    'EBF Number',
+    'Call Sign',
+    'Operator Class',
+    'Group Code',
+    'Region Code',
+    'Trustee Call Sign',
+    'Trustee Indicator',
+    'Physician Certification',
+    'VE Signature',
+    'Systematic Call Sign Change',
+    'Vanity Call Sign Change',
+    'Vanity Relationship',
+    'Previous Call Sign',
+    'Previous Operator Class',
+    'Trustee Name',
+]
+
+# License Header fields
+FCC_HD_FIELD_NAMES = [
+    'Record Type',
+    'Unique System Identifier',
+    'ULS File Number',
+    'EBF Number',
+    'Call Sign',
+    'License Status',
+    'Radio Service Code',
+    'Grant Date',
+    'Expired Date',
+    'Cancellation Date',
+    'Eligibility Rule Num',
+    'Reserved',
+    'Alien',
+    'Alien Government',
+    'Alien Corporation',
+    'Alien Officer',
+    'Alien Control',
+    'Revoked',
+    'Convicted',
+    'Adjudged',
+    'Reserved',
+    'Common Carrier',
+    'Non Common Carrier',
+    'Private Comm',
+    'Fixed',
+    'Mobile',
+    'Radiolocation',
+    'Satellite',
+    'Developmental or STA or Demonstration',
+    'Interconnected Service',
+    'Certifier First Name',
+    'Certifier MI',
+    'Certifier Last Name',
+    'Certifier Suffix',
+    'Certifier Title',
+    'Female',
+    'Black or African-American',
+    'Native American',
+    'Hawaiian',
+    'Asian',
+    'White',
+    'Hispanic',
+    'Effective Date',
+    'Last Action Date',
+    'Data File Format',
+    'of 89 HD',
+    'Auction ID integer',
+    'Broadcast Services - Regulatory Status',
+    'Band Manager - Regulatory Status',
+    'Broadcast Services - Type of Radio Service',
+    'Alien Ruling',
+    'Licensee Name Change',
+    'Whitespace Indicator',
+    'Operation/Performance Requirement Choice',
+    'Operation/Performance Requirement Answer',
+    'Discontinuation of Service',
+    'Regulatory Compliance',
+    '900 MHz Eligibility Certification',
+    '900 MHz Transition Plan Certification',
+    '900 MHz Return Spectrum Certification',
+    '900 MHz Payment Certification',
+]
+
+# Entity fields
+FCC_EN_FIELD_NAMES = [
+    'Record Type [EN]',
+    'Unique System Identifier',
+    'ULS File Number',
+    'EBF Number',
+    'Call Sign',
+    'Entity Type',
+    'Licensee ID',
+    'Entity Name',
+    'First Name',
+    'MI',
+    'Last Name',
+    'Suffix',
+    'Phone',
+    'Fax',
+    'Email',
+    'Street Address',
+    'City',
+    'State',
+    'Zip Code',
+    'PO Box',
+    'Attention Line',
+    'SGIN',
+    'FCC Registration Number (FRN)',
+    'Applicant Type Code',
+    'Applicant Type Code Other',
+    'Status Code',
+    'Status Date',
+    '3.7 GHz License Type',
+    'Linked Unique System Identifier',
+    'Linked Call Sign',
+]
+
+# REF: https://www.fcc.gov/wireless/data/public-access-files-database-downloads
+#      File: ULS Code Definitions, currently https://www.fcc.gov/sites/default/files/uls_code_definitions_20240215.txt
+
+LICENSE_STATUS_CODES = {
+    'A': 'Active',
+    'C': 'Canceled',
+    'E': 'Expired',
+    'L': 'Pending Legal Status',
+    'P': 'Parent Station Canceled',
+    'T': 'Terminated',
+    'X': 'Term Pending',
+}
+
+OPERATOR_CLASS_CODES = {
+    'A': 'Advanced',
+    'E': 'Amateur Extra',
+    'G': 'General',
+    'N': 'Novice',
+    'P': 'Technician Plus',
+    'T': 'Technician',
+}
+
+UNAVAILABLE_PATTERNS = [
+    # REF: "Call Sign Choices Not Available" http://www.arrl.org/vanity-call-signs
+    # 1.KA2AA-KA9ZZ, KC4AAA-KC4AAF, KC4USA-KC4USZ, KG4AA-KG4ZZ, KC6AA-KC6ZZ, KL9KAA- KL9KHZ, KX6AA-KX6ZZ;
+    r'^KA[2-9][A-Z][A-Z]$',
+    r'^KC4AA[A-F]$',
+    r'^KC4US[A-Z]$',
+    r'^KG4[A-Z][A-Z]$',
+    r'^KC6[A-Z][A-Z]$',
+    r'^KL9K[A-H][A-Z]$',
+    r'^KX6[A-Z][A-Z]$',
+    # 2. Any call sign having the letters SOS or QRA-QUZ as the suffix;
+    r'[A-Z]{1,2}\d(?>SOS|Q[R-U][A-Z])$',
+    # 3. Any call sign having the letters AM-AZ as the prefix
+    r'^A[M-Z]\d[A-Z]+$',
+    # 4. Any 2-by-3 format call sign having the letter X as the first letter of the suffix;
+    r'^[A-Z]{2}\dX[A-Z]{2}$',
+    # 5. Any 2-by-3 format call sign having the letters AF, KF, NF, or WF as the prefix and the letters EMA as the suffix
+    r'^[AKNW]F\dEMA$',
+    # 6. Any 2-by-3 format call sign having the letters AA-AL as the prefix
+    r'^A[A-L]\d[A-Z]{3}$',
+    # 7. Any 2-by-3 format call sign having the letters NA-NZ as the prefix;
+    r'^N[A-Z]\d[A-Z]{3}$',
+    # 8. Any 2-by-3 format call sign having the letters WC, WK, WM, WR, or WT as the prefix (Group X call signs);
+    r'^W[CKMRT]\d[A-Z]{3}$',
+    # 9.  Any 2-by-3 format call sign having the letters KP, NP or WP as the prefix and the numeral 0, 6, 7, 8 or 9;
+    # 10. Any 2-by-2 format call sign having the letters KP, NP or WP as the prefix and the numeral 0, 6, 7, 8 or 9;
+    # 11. Any 2-by-1 format call sign having the letters KP, NP or WP as the prefix and the numeral 0, 6, 7, 8 or 9;
+    r'^[KNW]P[06789][A-Z]{1,3}$',
+    # 12. Call signs having the single letter prefix (K, N or W), a single digit numeral 0-9 and a single letter suffix
+    r'^[KNW]\d[A-Z]$',
+]
+
+
+class LicenseRecord(typing.NamedTuple):
+    call_sign: str
+    status: str
+    frn: str | None
+    system_identifier: str
+    first_name: str | None
+    middle_initial: str | None
+    last_name: str | None
+    street_address: str | None
+    attn_line: str | None
+    city: str | None
+    state: str | None
+    zip_code: str | None
+    po_box: str | None
+    grant_date: str | None
+    expired_date: str | None
+    cancellation_date: str | None
+    operator_class: str | None
+    group_code: str | None
+    trustee_call_sign: str | None
+    trustee_name: str | None
+    previous_call_sign: str | None
+    region_code: str | None
+    vanity: str | None
+    systematic: str | None
+
+    @property
+    def call_sign_morse(self) -> str:
+        return ' '.join(MORSE_TABLE[c] for c in self.call_sign)
+
+    @property
+    def morse_dits(self) -> int:
+        return self.call_sign_morse.count('.')
+
+    @property
+    def morse_dahs(self) -> int:
+        return self.call_sign_morse.count('-')
+
+    @property
+    def format(self) -> str:
+        pattern = r'([A-Z]+)\d([A-Z]+)'
+        match = re.match(pattern, self.call_sign)
+        if not match:
+            return ''
+        prefix, suffix = match.groups()
+        return f'{len(prefix)}x{len(suffix)}'
+
+    @property
+    def phonetic(self) -> str:
+        return ' '.join(PHONETIC_WORDS[c] for c in self.call_sign)
+
+    @property
+    def syllable_length(self) -> int:
+        return self.get_syllable_length()
+
+    def get_syllable_length(self, lengths: dict[str, int] | None = None) -> int:
+        if lengths is None:
+            lengths = SYLLABLE_LENGTHS
+        return sum(lengths[c] for c in self.call_sign)
+
+    @property
+    def fcc_uls_link(self) -> str:
+        return f'https://wireless2.fcc.gov/UlsApp/UlsSearch/license.jsp?licKey={self.system_identifier}'
+
+    @property
+    def qrz_call_sign_link(self) -> str:
+        return f'https://www.qrz.com/db/{self.call_sign}'
+
+    def as_dict(self, include_synthetic: bool = False) -> dict[str, str | int | None]:
+        d: dict[str, str | int | None] = {
+            'call_sign': self.call_sign,
+            'status': self.status,
+            'frn': self.frn,
+            'system_identifier': self.system_identifier,
+            'first_name': self.first_name,
+            'middle_initial': self.middle_initial,
+            'last_name': self.last_name,
+            'street_address': self.street_address,
+            'attn_line': self.attn_line,
+            'city': self.city,
+            'state': self.state,
+            'zip_code': self.zip_code,
+            'po_box': self.po_box,
+            'grant_date': self.grant_date,
+            'expired_date': self.expired_date,
+            'cancellation_date': self.cancellation_date,
+            'operator_class': self.operator_class,
+            'group_code': self.group_code,
+            'trustee_call_sign': self.trustee_call_sign,
+            'trustee_name': self.trustee_name,
+            'previous_call_sign': self.previous_call_sign,
+            'region_code': self.region_code,
+            'vanity': self.vanity,
+            'systematic': self.systematic,
+        }
+        if include_synthetic:
+            d.update(
+                {
+                    'call_sign_morse': self.call_sign_morse,
+                    'morse_dits': self.morse_dits,
+                    'morse_dahs': self.morse_dahs,
+                    'format': self.format,
+                    'phonetic': self.phonetic,
+                    'syllable_length': self.syllable_length,
+                    'fcc_uls_link': self.fcc_uls_link,
+                    'qrz_call_sign_link': self.qrz_call_sign_link,
+                }
+            )
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Self:
+        return cls(
+            call_sign=d.get('call_sign'),  # type: ignore[arg-type]
+            status=d.get('status'),  # type: ignore[arg-type]
+            frn=d.get('frn'),
+            system_identifier=d.get('system_identifier'),  # type: ignore[arg-type]
+            first_name=d.get('first_name'),
+            middle_initial=d.get('middle_initial'),
+            last_name=d.get('last_name'),
+            street_address=d.get('street_address'),
+            attn_line=d.get('attn_line'),
+            city=d.get('city'),
+            state=d.get('state'),
+            zip_code=d.get('zip_code'),
+            po_box=d.get('po_box'),
+            grant_date=d.get('grant_date'),
+            expired_date=d.get('expired_date'),
+            cancellation_date=d.get('cancellation_date'),
+            operator_class=d.get('operator_class'),
+            group_code=d.get('group_code'),
+            trustee_call_sign=d.get('trustee_call_sign'),
+            trustee_name=d.get('trustee_name'),
+            previous_call_sign=d.get('previous_call_sign'),
+            region_code=d.get('region_code'),
+            vanity=d.get('vanity'),
+            systematic=d.get('systematic'),
+        )
 
 
 class CallsignInput(MDTextField):
@@ -30,6 +480,7 @@ class Callsigns(MDApp):
         super().__init__(*args, **kwargs)
 
     def build(self):
+        self.icon = icon_file
         self.store = JsonStore('callsigns.json')
         self.theme_cls.theme_style = 'Dark'
         self.container = MDGridLayout(cols=1, padding=[20, 40, 20, 20])
@@ -227,8 +678,8 @@ class Callsigns(MDApp):
 
         def on_success(req, result):
             data = result
-            from callsigns.parser import LicenseRecord
-
+            if isinstance(data, bytes):
+                data = json.loads(data.decode('utf-8'))
             data = [LicenseRecord.from_dict(lic_data).as_dict(include_synthetic=True) for lic_data in data]
             expires = req.resp_headers.get('expires')
             self.store.put(t, data=data, expires=expires)
